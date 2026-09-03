@@ -1,0 +1,33 @@
+{
+  "name": "package-health-checker",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "prepare": "husky"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ShelbyKelley/package-health-checker.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/ShelbyKelley/package-health-checker/issues"
+  },
+  "homepage": "https://github.com/ShelbyKelley/package-health-checker#readme",
+  "lint-staged": {
+    "backend/**/*.py": [
+      "backend/venv/bin/ruff check",
+      "backend/venv/bin/ruff format"
+    ]
+  },
+  "description": "",
+  "devDependencies": {
+    "@commitlint/cli": "^21.2.2",
+    "@commitlint/config-conventional": "^21.2.2",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0"
+  }
+}
