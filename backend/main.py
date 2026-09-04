@@ -1,3 +1,4 @@
+import re
 from urllib.parse import quote
 
 import httpx
@@ -8,10 +9,24 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "https://shelbyannkelley.com",
+    ],
     allow_methods=["GET"],
     allow_headers=["*"],
 )
+
+# npm package names: optionally scoped (@scope/name), lowercase, digits,
+# hyphens, dots, underscores. This also caps length, so the endpoint can't
+# be used to relay arbitrarily long strings to npm/OSV on our behalf.
+PACKAGE_NAME_PATTERN = re.compile(r"^(@[a-z0-9-_.]+/)?[a-z0-9-_.]{1,100}$")
+
+
+def validate_package_name(package_name: str) -> None:
+    if not PACKAGE_NAME_PATTERN.match(package_name):
+        raise HTTPException(status_code=400, detail="Invalid package name")
+
 
 NPM_REGISTRY_URL = "https://registry.npmjs.org"
 OSV_API_URL = "https://api.osv.dev/v1/query"
@@ -54,6 +69,7 @@ async def get_vulnerabilities(package_name: str):
 
 @app.get("/package/{package_name:path}")
 async def get_package(package_name: str):
+    validate_package_name(package_name)
     encoded_name = quote(package_name, safe="")
 
     async with httpx.AsyncClient() as client:
