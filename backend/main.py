@@ -2,8 +2,16 @@ from urllib.parse import quote
 
 import httpx
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
 
 NPM_REGISTRY_URL = "https://registry.npmjs.org"
 OSV_API_URL = "https://api.osv.dev/v1/query"
