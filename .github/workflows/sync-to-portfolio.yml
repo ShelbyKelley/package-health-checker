@@ -1,0 +1,44 @@
+name: Sync component to portfolio
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/src/components/PackageHealthCheckerTool.jsx'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out this repo
+        uses: actions/checkout@v4
+        with:
+          path: package-health-checker
+
+      - name: Check out portfolio repo
+        uses: actions/checkout@v4
+        with:
+          repository: ShelbyKelley/portfolio-site
+          token: ${{ secrets.PORTFOLIO_REPO_PAT }}
+          path: portfolio-site
+
+      - name: Copy component and adjust env variable name
+        run: |
+          sed 's/VITE_API_URL/VITE_PACKAGE_HEALTH_API_URL/' \
+            package-health-checker/frontend/src/components/PackageHealthCheckerTool.jsx \
+            > portfolio-site/src/components/PackageHealthCheckerTool.jsx
+
+      - name: Open pull request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.PORTFOLIO_REPO_PAT }}
+          path: portfolio-site
+          commit-message: 'sync: update PackageHealthCheckerTool from source repo'
+          title: 'Sync: PackageHealthCheckerTool update'
+          body: |
+            Automatic sync from the [Package Health Checker repo](https://github.com/ShelbyKelley/package-health-checker) after a change to the shared component.
+
+            Please review before merging — this was opened automatically.
+          branch: sync/package-health-checker-tool
+          base: main
