@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'frontend/src/components/PackageHealthCheckerTool.jsx'
+  workflow_dispatch:
 
 jobs:
   sync:
@@ -48,7 +49,7 @@ jobs:
         with:
           token: ${{ secrets.PORTFOLIO_REPO_PAT }}
           path: portfolio-site
-          commit-message: 'sync: update PackageHealthCheckerTool from source repo'
+          commit-message: 'chore: sync PackageHealthCheckerTool from source repo'
           title: 'Sync: PackageHealthCheckerTool update'
           body: |
             Automatic sync from the [Package Health Checker repo](https://github.com/ShelbyKelley/package-health-checker) after a change to the shared component.
