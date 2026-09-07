@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 
-const API_URL = 'http://localhost:8000'
+const API_URL = import.meta.env.VITE_API_URL
 
 function App() {
   const [packageName, setPackageName] = useState('')
@@ -109,7 +109,10 @@ function App() {
             ) : (
               <ul className="space-y-3">
                 {result.vulnerabilities.map((vuln) => (
-                  <li key={vuln.id} className="border-l-4 border-brand pl-3">
+                  <li
+                    key={vuln.id}
+                    className="border-l-4 border-brand pl-3"
+                  >
                     <div className="font-medium text-heading">
                       {vuln.id}
                       {vuln.cve && ` (${vuln.cve})`}
