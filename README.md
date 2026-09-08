@@ -18,8 +18,8 @@ Look up any npm package and see its real health at a glance: known vulnerabiliti
 - Least-privilege IAM execution role (logs only)
 
 **Frontend**
-- **React** (Vite) — search UI, with a `PackageHealthCheckerTool` component shared with my portfolio site (synced automatically via a GitHub Actions workflow that opens a PR against that repo whenever this component changes)
-- **Tailwind CSS v4** — styling, sharing a fall/Halloween theme (light/dark) with my [portfolio site](https://shelbyannkelley.com)
+- **React** (Vite) — search UI, with a `PackageHealthCheckerTool` component shared with my [portfolio site](https://github.com/ShelbyKelley/portfolio-site) (synced automatically via a GitHub Actions workflow that opens a PR against that repo whenever this component changes)
+- **Tailwind CSS v4** — styling, sharing a fall/Halloween theme (light/dark) with that same portfolio site
 - **ESLint** (`@eslint-react/eslint-plugin`, `eslint-plugin-jsx-a11y-x`, `eslint-plugin-import-x`) + **Prettier**
 
 **Tooling**
@@ -30,13 +30,18 @@ Look up any npm package and see its real health at a glance: known vulnerabiliti
 ## What it does
 
 - Pulls live package metadata (description, latest version, last publish date) from the npm registry
-- Cross-references known vulnerabilities via [OSV.dev](https://osv.dev), including severity and CVE numbers where available
-- Deduplicates and reconciles vulnerability data reported by multiple advisory sources into a single accurate view
+- Cross-references known vulnerabilities via [OSV.dev](https://osv.dev), including severity and CVE numbers where available, with a link to the full advisory for exact affected-version details
 - Supports scoped packages (e.g. `@angular/common`)
 - Validates package name input (format and length) before it reaches npm or OSV
 - Rate-limited at the API Gateway layer to prevent abuse (see Infrastructure above)
 
 ## Running it locally
+
+Both the Docker and manual setup need one environment file first:
+
+```bash
+echo "VITE_API_URL=http://localhost:8000" > frontend/.env.development
+```
 
 **With Docker (recommended — one command, both services):**
 
@@ -85,6 +90,7 @@ GET /package/lodash
       "cve": "CVE-2021-23337",
       "advisory_url": "https://osv.dev/vulnerability/GHSA-35jh-r3h4-6jhm"
     }
+    // ...9 more, truncated for this example
   ]
 }
 ```
@@ -103,9 +109,11 @@ npx prettier --check .
 
 ## Deploying backend changes
 
-Changes to the backend need to be rebuilt and pushed to the live Lambda function:
+Changes to the backend need to be rebuilt and pushed to the live Lambda function. ECR login tokens expire every 12 hours, so re-authenticate first if it's been a while:
 
 ```bash
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <account-id>.dkr.ecr.us-east-1.amazonaws.com
+
 cd backend
 docker build --provenance=false --platform linux/amd64 -f Dockerfile.lambda -t package-health-checker .
 docker tag package-health-checker:latest <account-id>.dkr.ecr.us-east-1.amazonaws.com/package-health-checker:latest
