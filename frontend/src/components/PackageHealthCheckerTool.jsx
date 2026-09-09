@@ -96,7 +96,7 @@ function PackageHealthCheckerTool() {
                     href={vuln.advisory_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-sm text-brand-secondary hover:underline"
+                    className="text-sm text-brand-secondary no-underline hover:underline"
                   >
                     View advisory →
                   </a>

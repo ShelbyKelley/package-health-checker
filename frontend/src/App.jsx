@@ -23,14 +23,14 @@ function App() {
     <div className="min-h-screen bg-surface px-6 py-12 transition-colors">
       <div className="max-w-2xl mx-auto">
         <div className="flex items-center justify-between mb-6">
-          <h1 className="font-heading text-3xl font-bold text-heading">
+          <h1 className="font-heading text-3xl font-light text-heading">
             Package Health Checker
           </h1>
           <button
             onClick={() => setDarkMode(!darkMode)}
-            className="rounded-full border border-subtle px-4 py-2 text-sm text-body hover:bg-brand hover:text-brand-contrast hover:border-brand transition-colors"
+            className="rounded-full border border-subtle px-4 py-2 font-mono text-[13px] text-body hover:border-brand hover:text-brand transition-colors duration-200"
           >
-            {darkMode ? '☀️ Light' : '🌙 Dark'}
+            {darkMode ? 'light mode' : 'dark mode'}
           </button>
         </div>
 
