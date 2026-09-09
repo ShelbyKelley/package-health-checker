@@ -43,6 +43,7 @@ function PackageHealthCheckerTool() {
           onChange={(e) => setPackageName(e.target.value)}
           placeholder="Enter a package name (e.g. lodash)"
           spellCheck={false}
+          autoCapitalize="off"
           className="flex-1 rounded-md border border-subtle bg-surface-alt px-4 py-2 text-heading placeholder:text-body focus:outline-none focus:ring-2 focus:ring-brand"
         />
         <button
@@ -53,6 +54,11 @@ function PackageHealthCheckerTool() {
           {loading ? 'Searching...' : 'Search'}
         </button>
       </form>
+
+      <p className="text-xs text-body mb-6 -mt-4">
+        Package names are case-sensitive — please verify the exact package
+        name before searching.
+      </p>
 
       {error && (
         <div className="rounded-md bg-surface-alt border border-brand p-4 text-brand">

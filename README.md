@@ -107,6 +107,17 @@ npx eslint .
 npx prettier --check .
 ```
 
+## Testing
+
+```bash
+# Backend (from backend/, with venv active)
+pip install -r requirements-dev.txt
+pytest
+```
+
+Backend tests mock outbound npm/OSV calls with `respx` — no live network
+access needed.
+
 ## Deploying backend changes
 
 Changes to the backend need to be rebuilt and pushed to the live Lambda function. ECR login tokens expire every 12 hours, so re-authenticate first if it's been a while:

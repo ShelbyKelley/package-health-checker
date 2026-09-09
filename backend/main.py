@@ -18,10 +18,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# npm package names: optionally scoped (@scope/name), lowercase, digits,
-# hyphens, dots, underscores. This also caps length, so the endpoint can't
-# be used to relay arbitrarily long strings to npm/OSV on our behalf.
-PACKAGE_NAME_PATTERN = re.compile(r"^(@[a-z0-9-_.]+/)?[a-z0-9-_.]{1,100}$")
+# Matches an npm package name, with or without an @scope/ prefix, made up
+# of letters, digits, hyphens, dots, and underscores. Case-sensitive, and
+# capped at 100 characters.
+PACKAGE_NAME_PATTERN = re.compile(r"^(@[a-zA-Z0-9-_.]+/)?[a-zA-Z0-9-_.]{1,100}$")
 
 
 def validate_package_name(package_name: str) -> None:
