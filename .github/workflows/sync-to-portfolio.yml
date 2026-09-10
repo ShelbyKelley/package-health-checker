@@ -4,7 +4,8 @@ on:
   push:
     branches: [main]
     paths:
-      - 'frontend/src/components/PackageHealthCheckerTool.jsx'
+      - 'frontend/src/components/PackageHealthChecker*.jsx'
+      - 'frontend/src/components/PackageHealthChecker*.js'
   workflow_dispatch:
 
 jobs:
@@ -13,46 +14,52 @@ jobs:
 
     steps:
       - name: Check out this repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: package-health-checker
 
       - name: Check out portfolio repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ShelbyKelley/portfolio-site
           token: ${{ secrets.PORTFOLIO_REPO_PAT }}
           path: portfolio-site
 
-      - name: Copy component and adjust env variable name
+      - name: Copy component and its supporting files, adjusting env variable name
         run: |
-          sed 's/VITE_API_URL/VITE_PACKAGE_HEALTH_API_URL/' \
-            package-health-checker/frontend/src/components/PackageHealthCheckerTool.jsx \
-            > portfolio-site/src/components/PackageHealthCheckerTool.jsx
+          for f in package-health-checker/frontend/src/components/PackageHealthChecker*.jsx \
+                   package-health-checker/frontend/src/components/PackageHealthChecker*.js; do
+            [ -e "$f" ] || continue
+            sed 's/VITE_API_URL/VITE_PACKAGE_HEALTH_API_URL/' "$f" \
+              > "portfolio-site/src/components/$(basename "$f")"
+          done
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
           cache: 'npm'
           cache-dependency-path: portfolio-site/package-lock.json
 
-      - name: Lint and format the copied file to match the portfolio's style
+      - name: Lint and format the copied files to match the portfolio's style
         working-directory: portfolio-site
         run: |
           npm ci
-          npx eslint --fix src/components/PackageHealthCheckerTool.jsx
-          npx prettier --write src/components/PackageHealthCheckerTool.jsx
+          npx eslint --fix src/components/PackageHealthChecker*.jsx src/components/PackageHealthChecker*.js
+          npx prettier --write src/components/PackageHealthChecker*.jsx src/components/PackageHealthChecker*.js
 
       - name: Open pull request
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v8
         with:
           token: ${{ secrets.PORTFOLIO_REPO_PAT }}
           path: portfolio-site
+          add-paths: |
+            src/components/PackageHealthChecker*.jsx
+            src/components/PackageHealthChecker*.js
           commit-message: 'chore: sync PackageHealthCheckerTool from source repo'
           title: 'Sync: PackageHealthCheckerTool update'
           body: |
-            Automatic sync from the [Package Health Checker repo](https://github.com/ShelbyKelley/package-health-checker) after a change to the shared component.
+            Automatic sync from the [Package Health Checker repo](https://github.com/ShelbyKelley/package-health-checker) after a change to the shared component or its supporting files.
 
             Please review before merging — this was opened automatically.
           branch: sync/package-health-checker-tool

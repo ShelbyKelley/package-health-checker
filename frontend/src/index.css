@@ -13,6 +13,16 @@
   --brand-secondary: oklch(0.54 0.152 52);
   --brand-contrast: oklch(0.968 0.016 72);
 
+  /* Severity scale — deep red to muted olive, echoing fall foliage */
+  --severity-critical: oklch(0.38 0.19 15);
+  --severity-high: oklch(0.52 0.17 40);
+  --severity-moderate: oklch(0.6 0.15 75);
+  --severity-low: oklch(0.52 0.08 130);
+
+  /* Explicit safe/danger status colors, distinct from the brand hues */
+  --status-safe: oklch(0.5 0.14 145);
+  --status-danger: oklch(0.5 0.19 25);
+
   --sans: 'Newsreader', Georgia, serif;
   --heading-font: 'Newsreader', Georgia, serif;
   --mono: 'IBM Plex Mono', ui-monospace, Consolas, monospace;
@@ -35,6 +45,16 @@
   --brand: oklch(0.702 0.152 302);
   --brand-secondary: oklch(0.812 0.178 148);
   --brand-contrast: oklch(0.176 0.032 302);
+
+  /* Severity scale — blood red to pumpkin to candy-corn yellow to teal */
+  --severity-critical: oklch(0.62 0.19 15);
+  --severity-high: oklch(0.72 0.17 45);
+  --severity-moderate: oklch(0.8 0.15 85);
+  --severity-low: oklch(0.68 0.08 190);
+
+  /* Explicit safe/danger status colors, distinct from the brand hues */
+  --status-safe: oklch(0.72 0.16 145);
+  --status-danger: oklch(0.65 0.19 25);
 }
 
 body {
@@ -72,6 +92,12 @@ button:focus-visible {
   --color-brand: var(--brand);
   --color-brand-secondary: var(--brand-secondary);
   --color-brand-contrast: var(--brand-contrast);
+  --color-severity-critical: var(--severity-critical);
+  --color-severity-high: var(--severity-high);
+  --color-severity-moderate: var(--severity-moderate);
+  --color-severity-low: var(--severity-low);
+  --color-status-safe: var(--status-safe);
+  --color-status-danger: var(--status-danger);
   --font-heading: var(--heading-font);
   --font-sans: var(--sans);
   --font-mono: var(--mono);

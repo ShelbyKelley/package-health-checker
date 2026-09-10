@@ -1,3 +1,5 @@
+import json
+
 import respx
 from fastapi.testclient import TestClient
 from httpx import Response
@@ -29,18 +31,89 @@ SCOPED_PACKAGE_BODY = {
     "time": {"0.0.0": "2000-01-01T00:00:00.000Z"},
 }
 
+VULN_FIXED_IN_LATEST = {
+    "id": "GHSA-fixed-0001",
+    "summary": "old bug, fixed in a later release",
+    "database_specific": {"severity": "LOW"},
+    "aliases": [],
+}
+
+VULN_STILL_IN_LATEST = {
+    "id": "GHSA-current-0001",
+    "summary": "still present in the latest release",
+    "database_specific": {"severity": "HIGH"},
+    "aliases": ["CVE-2099-00001"],
+}
+
+
+def osv_split_by_version(request):
+    """Mimics OSV: an unscoped query returns every vuln ever reported;
+    a version-scoped query returns only the ones affecting that version."""
+    body = json.loads(request.content)
+    if "version" in body:
+        return Response(200, json={"vulns": [VULN_STILL_IN_LATEST]})
+    return Response(200, json={"vulns": [VULN_FIXED_IN_LATEST, VULN_STILL_IN_LATEST]})
+
 
 @respx.mock
 def test_lowercase_package_name_works():
     respx.get(f"{NPM_REGISTRY_URL}/examplepkg").mock(
         return_value=Response(200, json=LOWERCASE_PACKAGE_BODY)
     )
-    respx.post(OSV_API_URL).mock(return_value=Response(200, json={"vulns": []}))
+    osv_route = respx.post(OSV_API_URL).mock(
+        return_value=Response(200, json={"vulns": []})
+    )
 
     response = client.get("/package/examplepkg")
+    body = response.json()
 
     assert response.status_code == 200
-    assert response.json()["name"] == "examplepkg"
+    assert body["name"] == "examplepkg"
+    assert body["latest_version_vulnerable"] is False
+    # No vulnerabilities at all means there's nothing to check against the
+    # latest version, so we shouldn't spend a second OSV call finding out.
+    assert osv_route.call_count == 1
+
+
+@respx.mock
+def test_latest_version_vulnerable_when_a_vuln_still_affects_it():
+    respx.get(f"{NPM_REGISTRY_URL}/examplepkg").mock(
+        return_value=Response(200, json=LOWERCASE_PACKAGE_BODY)
+    )
+    respx.post(OSV_API_URL).mock(side_effect=osv_split_by_version)
+
+    response = client.get("/package/examplepkg")
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["latest_version_vulnerable"] is True
+    assert body["vulnerability_count"] == 2
+
+    by_id = {vuln["id"]: vuln for vuln in body["vulnerabilities"]}
+    assert by_id["GHSA-current-0001"]["affects_latest_version"] is True
+    assert by_id["GHSA-fixed-0001"]["affects_latest_version"] is False
+
+
+@respx.mock
+def test_latest_version_not_vulnerable_when_all_vulns_are_fixed():
+    respx.get(f"{NPM_REGISTRY_URL}/examplepkg").mock(
+        return_value=Response(200, json=LOWERCASE_PACKAGE_BODY)
+    )
+    respx.post(OSV_API_URL).mock(
+        side_effect=lambda request: (
+            Response(200, json={"vulns": []})
+            if "version" in json.loads(request.content)
+            else Response(200, json={"vulns": [VULN_FIXED_IN_LATEST]})
+        )
+    )
+
+    response = client.get("/package/examplepkg")
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["latest_version_vulnerable"] is False
+    assert body["vulnerability_count"] == 1
+    assert body["vulnerabilities"][0]["affects_latest_version"] is False
 
 
 @respx.mock

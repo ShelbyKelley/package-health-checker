@@ -1,5 +1,10 @@
 import { useState } from 'react'
 
+import { getSeverityRank } from './PackageHealthCheckerConstants'
+import PackageHealthCheckerFilters from './PackageHealthCheckerFilters'
+import PackageHealthCheckerStatusBanner from './PackageHealthCheckerStatusBanner'
+import PackageHealthCheckerVulnerabilityList from './PackageHealthCheckerVulnerabilityList'
+
 const API_URL = import.meta.env.VITE_API_URL
 
 function PackageHealthCheckerTool() {
@@ -7,6 +12,10 @@ function PackageHealthCheckerTool() {
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [page, setPage] = useState(0)
+  const [sortBy, setSortBy] = useState('default')
+  const [severityFilter, setSeverityFilter] = useState('ALL')
+  const [affectsLatestOnly, setAffectsLatestOnly] = useState(false)
 
   async function handleSearch(event) {
     event.preventDefault()
@@ -15,6 +24,10 @@ function PackageHealthCheckerTool() {
     setLoading(true)
     setError(null)
     setResult(null)
+    setPage(0)
+    setSortBy('default')
+    setSeverityFilter('ALL')
+    setAffectsLatestOnly(false)
 
     try {
       const response = await fetch(
@@ -33,6 +46,32 @@ function PackageHealthCheckerTool() {
       setLoading(false)
     }
   }
+
+  const visibleVulnerabilities = (result?.vulnerabilities ?? [])
+    .filter((vuln) => {
+      if (
+        severityFilter !== 'ALL' &&
+        (vuln.severity ?? '').toUpperCase() !== severityFilter
+      ) {
+        return false
+      }
+      if (affectsLatestOnly && !vuln.affects_latest_version) return false
+      return true
+    })
+    .sort((a, b) => {
+      if (sortBy === 'severity-desc') {
+        return getSeverityRank(b.severity) - getSeverityRank(a.severity)
+      }
+      if (sortBy === 'severity-asc') {
+        return getSeverityRank(a.severity) - getSeverityRank(b.severity)
+      }
+      if (sortBy === 'affects-latest') {
+        return (
+          Number(b.affects_latest_version) - Number(a.affects_latest_version)
+        )
+      }
+      return 0
+    })
 
   return (
     <div className="mt-8">
@@ -56,8 +95,8 @@ function PackageHealthCheckerTool() {
       </form>
 
       <p className="text-xs text-body mb-6 -mt-4">
-        Package names are case-sensitive — please verify the exact package
-        name before searching.
+        Package names are case-sensitive — please verify the exact package name
+        before searching.
       </p>
 
       {error && (
@@ -77,38 +116,45 @@ function PackageHealthCheckerTool() {
             {new Date(result.last_publish_date).toLocaleDateString()}
           </div>
 
-          <h3 className="font-heading font-semibold text-heading mb-2">
-            Vulnerabilities ({result.vulnerability_count})
-          </h3>
-          {result.vulnerability_count === 0 ? (
-            <p className="text-brand-secondary">
-              No known vulnerabilities found.
-            </p>
-          ) : (
-            <ul className="space-y-3">
-              {result.vulnerabilities.map((vuln) => (
-                <li key={vuln.id} className="border-l-4 border-brand pl-3">
-                  <div className="font-medium text-heading">
-                    {vuln.id}
-                    {vuln.cve && ` (${vuln.cve})`}
-                  </div>
-                  {vuln.severity && (
-                    <div className="text-sm text-brand">
-                      Severity: {vuln.severity}
-                    </div>
-                  )}
-                  <p className="text-sm text-body">{vuln.summary}</p>
-                  <a
-                    href={vuln.advisory_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm text-brand-secondary no-underline hover:underline"
-                  >
-                    View advisory →
-                  </a>
-                </li>
-              ))}
-            </ul>
+          <PackageHealthCheckerStatusBanner
+            latestVersion={result.latest_version}
+            vulnerable={result.latest_version_vulnerable}
+          />
+
+          {result.vulnerability_count > 0 && (
+            <>
+              <h3 className="font-heading font-semibold text-heading mb-2 mt-6">
+                Vulnerability history ({visibleVulnerabilities.length}
+                {visibleVulnerabilities.length !== result.vulnerability_count
+                  ? ` of ${result.vulnerability_count}`
+                  : ''}
+                )
+              </h3>
+
+              <PackageHealthCheckerFilters
+                sortBy={sortBy}
+                onSortByChange={(value) => {
+                  setSortBy(value)
+                  setPage(0)
+                }}
+                severityFilter={severityFilter}
+                onSeverityFilterChange={(value) => {
+                  setSeverityFilter(value)
+                  setPage(0)
+                }}
+                affectsLatestOnly={affectsLatestOnly}
+                onAffectsLatestOnlyChange={(value) => {
+                  setAffectsLatestOnly(value)
+                  setPage(0)
+                }}
+              />
+
+              <PackageHealthCheckerVulnerabilityList
+                vulnerabilities={visibleVulnerabilities}
+                page={page}
+                onPageChange={setPage}
+              />
+            </>
           )}
         </div>
       )}
