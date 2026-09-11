@@ -3,7 +3,9 @@ line-length = 88
 target-version = "py313"
 
 [tool.ruff.lint]
-select = ["E", "W", "F", "I"]
+# ASYNC is worth having here specifically because every request path is
+# async and blocking calls in one would stall the whole event loop.
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "C4", "RUF", "PT", "ASYNC"]
 
 [tool.ruff.format]
 quote-style = "double"

@@ -33,6 +33,7 @@ export default defineConfig([
       },
     },
     rules: {
+      'no-console': 'warn',
       'import-x/order': [
         'warn',
         {
