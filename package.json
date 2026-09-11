@@ -1,22 +1,23 @@
 {
   "name": "package-health-checker",
   "version": "1.0.0",
-  "main": "index.js",
+  "private": true,
+  "description": "Repo-root tooling (Husky, lint-staged, commitlint) for the Package Health Checker backend and frontend.",
+  "author": "Shelby Kelley",
+  "license": "ISC",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "echo \"No tests at the repo root — run pytest from backend/. See README.\" && exit 1",
     "prepare": "husky"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ShelbyKelley/package-health-checker.git"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "bugs": {
     "url": "https://github.com/ShelbyKelley/package-health-checker/issues"
   },
   "homepage": "https://github.com/ShelbyKelley/package-health-checker#readme",
+  "keywords": [],
   "lint-staged": {
     "backend/**/*.py": [
       "backend/venv/bin/ruff check --fix",
@@ -30,7 +31,6 @@
       "cd frontend && npx prettier --write"
     ]
   },
-  "description": "",
   "devDependencies": {
     "@commitlint/cli": "^21.2.2",
     "@commitlint/config-conventional": "^21.2.2",
