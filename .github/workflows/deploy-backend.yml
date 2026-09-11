@@ -1,0 +1,75 @@
+name: Deploy backend
+
+# Runs only after CI succeeds on main, so a red build never reaches Lambda.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    branches: [main]
+    types: [completed]
+
+permissions:
+  id-token: write
+  contents: read
+
+# Never let two deploys race to update the same function.
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success'
+    env:
+      IMAGE_URI: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com/package-health-checker:${{ github.event.workflow_run.head_sha }}
+
+    steps:
+      # Deliberately unconditional. Detecting "did backend/ change" from a
+      # workflow_run event is not reliable: the event carries no commit range,
+      # and `git diff HEAD^ HEAD` inspects only the most recent commit — so a
+      # push of several commits would silently skip a backend change made in
+      # any but the last one, leaving the live API behind main with a green
+      # check. A redundant deploy is cheap; a missed one is invisible.
+      - name: Check out code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Log in to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # --provenance=false because Lambda rejects the OCI manifest format
+      # buildx produces by default. --platform is explicit so the image can
+      # never drift from the function's architecture.
+      - name: Build image
+        working-directory: backend
+        run: |
+          docker build \
+            --provenance=false \
+            --platform linux/amd64 \
+            -f Dockerfile.lambda \
+            -t "$IMAGE_URI" .
+
+      - name: Push image
+        run: docker push "$IMAGE_URI"
+
+      # Tagged by commit SHA, so the deployed image is always traceable to
+      # the commit that produced it.
+      - name: Update Lambda function
+        run: |
+          aws lambda update-function-code \
+            --function-name package-health-checker \
+            --image-uri "$IMAGE_URI"
+
+      # update-function-code returns before the new image is live; without
+      # this the job can go green on a deploy that later fails.
+      - name: Wait for the update to finish
+        run: |
+          aws lambda wait function-updated \
+            --function-name package-health-checker
