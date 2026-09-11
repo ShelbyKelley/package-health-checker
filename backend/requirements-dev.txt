@@ -1,12 +1,17 @@
-cfgv==3.5.0
-distlib==0.4.3
-filelock==3.32.5
+# Lint/test tooling. Layers on top of the runtime pins so the two files can
+# never drift into conflicting versions of a shared dependency.
+-r requirements.txt
+
+# httpx2 is what Starlette's TestClient now prefers; without it the test run
+# emits a StarletteDeprecationWarning. Test-only — the app itself still makes
+# its outbound calls with httpx.
+httpcore2==2.12.0
 httpx2==2.12.0
-identify==2.6.19
-nodeenv==1.10.0
-platformdirs==4.11.5
+iniconfig==2.3.0
+packaging==26.3
+pluggy==1.6.0
+Pygments==2.21.0
 pytest==9.1.1
-PyYAML==6.0.3
 respx==0.23.1
 ruff==0.16.5
-virtualenv==21.7.7
+truststore==0.10.4
