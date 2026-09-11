@@ -1,6 +1,9 @@
 function PackageHealthCheckerStatusBanner({ latestVersion, vulnerable }) {
   return (
+    // role=status announces the verdict when it replaces the previous
+    // result, which is the one thing a screen reader user is waiting for.
     <div
+      role="status"
       className={`flex items-center gap-2 rounded-md border p-4 font-medium ${
         vulnerable
           ? 'border-status-danger text-status-danger'
