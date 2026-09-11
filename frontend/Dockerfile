@@ -1,9 +1,11 @@
-FROM node:20-slim
+FROM node:24-slim
 
 WORKDIR /app
 
-COPY package*.json .
-RUN npm install
+# npm ci installs exactly what package-lock.json pins, and matches the
+# Node version in .nvmrc that CI builds against.
+COPY package*.json ./
+RUN npm ci
 
 COPY . .
 
