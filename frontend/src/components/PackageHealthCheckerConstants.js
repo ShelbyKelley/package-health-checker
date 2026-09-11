@@ -22,3 +22,28 @@ export const SORT_OPTIONS = [
   { value: 'severity-asc', label: 'Severity: low to high' },
   { value: 'affects-latest', label: 'Affects latest first' },
 ]
+
+// Every failure used to surface as "Package not found", which hid the two
+// cases a user can actually act on: a name typo and hitting the API's rate
+// limit. Keyed by the status the backend returns.
+const ERROR_MESSAGES = {
+  400: 'That does not look like a valid npm package name.',
+  404: 'Package not found — names are case-sensitive, so check the exact spelling.',
+  429: 'Too many requests right now. Wait a moment and try again.',
+  502: 'The npm registry or vulnerability database is temporarily unavailable. Try again shortly.',
+}
+
+export const NETWORK_ERROR_MESSAGE =
+  'Could not reach the API. Check your connection and try again.'
+
+// Shown when the build has no API URL baked in. Naming the variable is the
+// whole point — this is a deploy mistake, and it should say how to fix it.
+export const CONFIGURATION_ERROR_MESSAGE =
+  'This tool is not configured: VITE_API_URL was missing at build time.'
+
+export function getErrorMessage(status) {
+  return (
+    ERROR_MESSAGES[status] ??
+    'Something went wrong looking up that package. Please try again.'
+  )
+}
