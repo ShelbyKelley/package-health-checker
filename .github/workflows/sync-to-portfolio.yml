@@ -8,6 +8,16 @@ on:
       - 'frontend/src/components/PackageHealthChecker*.js'
   workflow_dispatch:
 
+# The cross-repo work is all done with PORTFOLIO_REPO_PAT; the default token
+# needs nothing beyond reading this repo.
+permissions:
+  contents: read
+
+# One sync PR at a time — concurrent runs would fight over the same branch.
+concurrency:
+  group: sync-to-portfolio
+  cancel-in-progress: false
+
 jobs:
   sync:
     runs-on: ubuntu-latest
@@ -25,19 +35,22 @@ jobs:
           token: ${{ secrets.PORTFOLIO_REPO_PAT }}
           path: portfolio-site
 
+      # The /g matters: the component names the env var in more than one
+      # place (the read and the misconfiguration message), and without it
+      # only the first mention per line would be renamed.
       - name: Copy component and its supporting files, adjusting env variable name
         run: |
           for f in package-health-checker/frontend/src/components/PackageHealthChecker*.jsx \
                    package-health-checker/frontend/src/components/PackageHealthChecker*.js; do
             [ -e "$f" ] || continue
-            sed 's/VITE_API_URL/VITE_PACKAGE_HEALTH_API_URL/' "$f" \
+            sed 's/VITE_API_URL/VITE_PACKAGE_HEALTH_API_URL/g' "$f" \
               > "portfolio-site/src/components/$(basename "$f")"
           done
 
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version-file: portfolio-site/.nvmrc
           cache: 'npm'
           cache-dependency-path: portfolio-site/package-lock.json
 
