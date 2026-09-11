@@ -1,12 +1,21 @@
 import json
 
+import httpx
+import pytest
 import respx
 from fastapi.testclient import TestClient
 from httpx import Response
 
-from main import NPM_REGISTRY_URL, OSV_API_URL, app
+from main import MAX_PACKAGE_NAME_LENGTH, NPM_REGISTRY_URL, OSV_API_URL, app
 
-client = TestClient(app)
+
+@pytest.fixture
+def client():
+    """Enters the app's lifespan so the shared httpx client exists, the same
+    way it does under uvicorn and Mangum."""
+    with TestClient(app) as test_client:
+        yield test_client
+
 
 # Synthetic fixture data — not real npm packages. Versions/dates are
 # placeholders so these tests never depend on (or drift with) real
@@ -56,7 +65,7 @@ def osv_split_by_version(request):
 
 
 @respx.mock
-def test_lowercase_package_name_works():
+def test_lowercase_package_name_works(client):
     respx.get(f"{NPM_REGISTRY_URL}/examplepkg").mock(
         return_value=Response(200, json=LOWERCASE_PACKAGE_BODY)
     )
@@ -76,7 +85,7 @@ def test_lowercase_package_name_works():
 
 
 @respx.mock
-def test_latest_version_vulnerable_when_a_vuln_still_affects_it():
+def test_latest_version_vulnerable_when_a_vuln_still_affects_it(client):
     respx.get(f"{NPM_REGISTRY_URL}/examplepkg").mock(
         return_value=Response(200, json=LOWERCASE_PACKAGE_BODY)
     )
@@ -95,7 +104,7 @@ def test_latest_version_vulnerable_when_a_vuln_still_affects_it():
 
 
 @respx.mock
-def test_latest_version_not_vulnerable_when_all_vulns_are_fixed():
+def test_latest_version_not_vulnerable_when_all_vulns_are_fixed(client):
     respx.get(f"{NPM_REGISTRY_URL}/examplepkg").mock(
         return_value=Response(200, json=LOWERCASE_PACKAGE_BODY)
     )
@@ -117,7 +126,7 @@ def test_latest_version_not_vulnerable_when_all_vulns_are_fixed():
 
 
 @respx.mock
-def test_mixed_case_package_name_is_accepted_and_looked_up_as_typed():
+def test_mixed_case_package_name_is_accepted_and_looked_up_as_typed(client):
     npm_route = respx.get(f"{NPM_REGISTRY_URL}/MixedCasePkg").mock(
         return_value=Response(200, json=MIXED_CASE_PACKAGE_BODY)
     )
@@ -134,7 +143,7 @@ def test_mixed_case_package_name_is_accepted_and_looked_up_as_typed():
 
 
 @respx.mock
-def test_wrong_case_input_404s_without_retry():
+def test_wrong_case_input_404s_without_retry(client):
     # Lookups are case-sensitive and we don't guess at alternate casing —
     # the caller is expected to pass the exact registered name.
     route = respx.get(f"{NPM_REGISTRY_URL}/Examplepkg").mock(return_value=Response(404))
@@ -146,7 +155,7 @@ def test_wrong_case_input_404s_without_retry():
 
 
 @respx.mock
-def test_unknown_package_404s():
+def test_unknown_package_404s(client):
     respx.get(f"{NPM_REGISTRY_URL}/nonexistent-package").mock(
         return_value=Response(404)
     )
@@ -156,13 +165,13 @@ def test_unknown_package_404s():
     assert response.status_code == 404
 
 
-def test_invalid_characters_are_rejected():
+def test_invalid_characters_are_rejected(client):
     response = client.get("/package/ex$amplepkg")
 
     assert response.status_code == 400
 
 
-def test_scoped_package_name_with_uppercase_is_accepted():
+def test_scoped_package_name_with_uppercase_is_accepted(client):
     with respx.mock:
         respx.get(f"{NPM_REGISTRY_URL}/@Scope%2FPackage").mock(
             return_value=Response(200, json=SCOPED_PACKAGE_BODY)
@@ -173,3 +182,75 @@ def test_scoped_package_name_with_uppercase_is_accepted():
 
     assert response.status_code == 200
     assert response.json()["name"] == "@Scope/Package"
+
+
+def test_leading_dot_is_rejected(client):
+    # npm itself forbids a leading dot, and rejecting it keeps dot-segments
+    # out of the registry path we build. ("." and ".." never reach the
+    # handler at all — the URL is path-normalized before routing.)
+    response = client.get("/package/.hidden")
+
+    assert response.status_code == 400
+
+
+def test_overlong_scoped_name_is_rejected(client):
+    # The scope segment is unbounded in the pattern, so the explicit
+    # length cap is the only thing bounding this input.
+    long_scope = "a" * (MAX_PACKAGE_NAME_LENGTH + 1)
+
+    response = client.get(f"/package/@{long_scope}/pkg")
+
+    assert response.status_code == 400
+
+
+@respx.mock
+def test_registry_outage_is_a_502_not_a_500(client):
+    respx.get(f"{NPM_REGISTRY_URL}/examplepkg").mock(
+        side_effect=httpx.ConnectError("boom")
+    )
+
+    response = client.get("/package/examplepkg")
+
+    assert response.status_code == 502
+
+
+@respx.mock
+def test_malformed_registry_payload_is_a_502_not_a_500(client):
+    respx.get(f"{NPM_REGISTRY_URL}/examplepkg").mock(
+        return_value=Response(200, json={"name": "examplepkg"})
+    )
+
+    response = client.get("/package/examplepkg")
+
+    assert response.status_code == 502
+
+
+@respx.mock
+def test_osv_outage_is_a_502_not_a_500(client):
+    respx.get(f"{NPM_REGISTRY_URL}/examplepkg").mock(
+        return_value=Response(200, json=LOWERCASE_PACKAGE_BODY)
+    )
+    respx.post(OSV_API_URL).mock(return_value=Response(500))
+
+    response = client.get("/package/examplepkg")
+
+    assert response.status_code == 502
+
+
+@respx.mock
+def test_unparseable_publish_date_is_a_502_not_a_500(client):
+    respx.get(f"{NPM_REGISTRY_URL}/examplepkg").mock(
+        return_value=Response(
+            200,
+            json={
+                "name": "examplepkg",
+                "dist-tags": {"latest": "1.0.0"},
+                "time": {"1.0.0": "not-a-date"},
+            },
+        )
+    )
+    respx.post(OSV_API_URL).mock(return_value=Response(200, json={"vulns": []}))
+
+    response = client.get("/package/examplepkg")
+
+    assert response.status_code == 502
