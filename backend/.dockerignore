@@ -1,0 +1,14 @@
+# The build context is copied in wholesale by `COPY . .`, and venv/ alone is
+# ~80MB — keeping it out matters for image size and Lambda cold starts.
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Test and tooling files have no place in a runtime image.
+test_main.py
+requirements-dev.txt
+Dockerfile
+Dockerfile.lambda
+.dockerignore

@@ -1,0 +1,15 @@
+# node_modules is installed inside the image; copying the host's in would
+# both bloat the context and risk platform-specific binaries.
+node_modules/
+dist/
+dist-ssr/
+
+# Secrets and local-only config must never land in an image layer.
+.env
+.env.*
+*.local
+
+*.log
+.DS_Store
+Dockerfile
+.dockerignore
