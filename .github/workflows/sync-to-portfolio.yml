@@ -35,17 +35,38 @@ jobs:
           token: ${{ secrets.PORTFOLIO_REPO_PAT }}
           path: portfolio-site
 
-      # The /g matters: the component names the env var in more than one
-      # place (the read and the misconfiguration message), and without it
-      # only the first mention per line would be renamed.
-      - name: Copy component and its supporting files, adjusting env variable name
+      # The /g matters on both substitutions: the component names the env var
+      # in more than one place (the read and the misconfiguration message),
+      # and files import each other by name (e.g. PackageHealthCheckerTool.jsx
+      # imports './PackageHealthCheckerStatusBanner') — without /g only the
+      # first mention per line would be rewritten. Files land in their own
+      # PackageHealthChecker/ folder with the shared prefix stripped, since
+      # the folder now provides the namespacing the prefix used to.
+      - name: Copy component and its supporting files, adjusting env variable name and import paths
         run: |
+          mkdir -p portfolio-site/src/components/PackageHealthChecker
+          names=()
           for f in package-health-checker/frontend/src/components/PackageHealthChecker*.jsx \
                    package-health-checker/frontend/src/components/PackageHealthChecker*.js; do
             [ -e "$f" ] || continue
-            sed 's/VITE_API_URL/VITE_PACKAGE_HEALTH_API_URL/g' "$f" \
-              > "portfolio-site/src/components/$(basename "$f")"
+            base="$(basename "$f")"
+            dest="${base#PackageHealthChecker}"
+            names+=("${dest%.*}")
+            sed -e 's/VITE_API_URL/VITE_PACKAGE_HEALTH_API_URL/g' \
+                -e 's#\./PackageHealthChecker#./#g' \
+              "$f" > "portfolio-site/src/components/PackageHealthChecker/$dest"
           done
+
+          # The files are renamed above, but each is still imported and used
+          # (import specifiers, JSX tags) under its old PackageHealthChecker<Name>
+          # identifier — strip the prefix there too, everywhere it appears in
+          # every synced file, now that the folder provides the namespacing
+          # the prefix used to.
+          rename_args=()
+          for name in "${names[@]}"; do
+            rename_args+=(-e "s/\bPackageHealthChecker${name}\b/${name}/g")
+          done
+          sed -i "${rename_args[@]}" portfolio-site/src/components/PackageHealthChecker/*
 
       - name: Set up Node
         uses: actions/setup-node@v7
@@ -58,8 +79,8 @@ jobs:
         working-directory: portfolio-site
         run: |
           npm ci
-          npx eslint --fix src/components/PackageHealthChecker*.jsx src/components/PackageHealthChecker*.js
-          npx prettier --write src/components/PackageHealthChecker*.jsx src/components/PackageHealthChecker*.js
+          npx eslint --fix src/components/PackageHealthChecker/*.jsx src/components/PackageHealthChecker/*.js
+          npx prettier --write src/components/PackageHealthChecker/*.jsx src/components/PackageHealthChecker/*.js
 
       - name: Open pull request
         uses: peter-evans/create-pull-request@v8
@@ -67,8 +88,7 @@ jobs:
           token: ${{ secrets.PORTFOLIO_REPO_PAT }}
           path: portfolio-site
           add-paths: |
-            src/components/PackageHealthChecker*.jsx
-            src/components/PackageHealthChecker*.js
+            src/components/PackageHealthChecker/**
           commit-message: 'chore: sync PackageHealthCheckerTool from source repo'
           title: 'Sync: PackageHealthCheckerTool update'
           body: |
