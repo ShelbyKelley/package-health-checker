@@ -1,41 +1,31 @@
 import logging
-import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Annotated, Any
-from urllib.parse import quote
+from typing import Annotated
 
 import httpx
-from fastapi import FastAPI, HTTPException, Path, Request
+from fastapi import FastAPI, HTTPException, Path, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 
-from models import ErrorResponse, PackageHealth, ServiceStatus, Vulnerability
-
-logger = logging.getLogger(__name__)
-
-NPM_REGISTRY_URL = "https://registry.npmjs.org"
-OSV_API_URL = "https://api.osv.dev/v1/query"
-OSV_ADVISORY_URL = "https://osv.dev/vulnerability"
-
-# Lambda bills wall-clock time, so a hung upstream is a cost problem as much
-# as a latency one. Keep the ceiling well under the function's own timeout.
-UPSTREAM_TIMEOUT = httpx.Timeout(5.0, connect=3.0)
-
-# npm's own documented maximum package-name length.
-MAX_PACKAGE_NAME_LENGTH = 214
-
-# An npm package name, with or without an @scope/ prefix: letters, digits,
-# hyphens, dots, and underscores. Case-sensitive, because the registry is.
-# Neither the scope nor the name may start with a dot, which keeps "." and
-# ".." out of the path we build against the registry.
-PACKAGE_NAME_PATTERN = re.compile(
-    r"^(@[a-zA-Z0-9_][a-zA-Z0-9._-]*/)?[a-zA-Z0-9_][a-zA-Z0-9._-]*$"
+from clients import (
+    REGISTRY_UNUSABLE,
+    UPSTREAM_TIMEOUT,
+    extract_license,
+    fetch_package_metadata,
+    fetch_weekly_downloads,
+    get_vulnerabilities,
+    validate_package_name,
+    validate_version,
+)
+from models import (
+    ErrorResponse,
+    PackageHealth,
+    ServiceStatus,
+    VersionVulnerabilities,
 )
 
-REGISTRY_UNAVAILABLE = "The npm registry is unavailable right now"
-REGISTRY_UNUSABLE = "The npm registry returned an unexpected response"
-OSV_UNAVAILABLE = "Vulnerability data is unavailable right now"
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -69,82 +59,51 @@ app.add_middleware(
 )
 
 
-def validate_package_name(package_name: str) -> None:
-    # Length is checked separately from the pattern: the scope and name parts
-    # are each unbounded in the regex, so only an explicit total-length cap
-    # actually bounds the input.
-    if len(package_name) > MAX_PACKAGE_NAME_LENGTH:
-        raise HTTPException(status_code=400, detail="Package name is too long")
-    if not PACKAGE_NAME_PATTERN.match(package_name):
-        raise HTTPException(status_code=400, detail="Invalid package name")
-
-
 @app.get("/", response_model=ServiceStatus, tags=["meta"])
 def read_root() -> ServiceStatus:
     return ServiceStatus(message="Package Health Checker API is running")
 
 
-def to_vulnerability(vuln: dict[str, Any]) -> Vulnerability:
-    return Vulnerability(
-        id=vuln["id"],
-        summary=vuln.get("summary"),
-        severity=vuln.get("database_specific", {}).get("severity"),
-        cve=next(
-            (alias for alias in vuln.get("aliases", []) if alias.startswith("CVE-")),
-            None,
-        ),
-        advisory_url=f"{OSV_ADVISORY_URL}/{vuln['id']}",
+@app.get(
+    "/package/{package_name:path}/vulnerabilities",
+    response_model=VersionVulnerabilities,
+    tags=["packages"],
+    summary="Check whether one exact installed version has known vulnerabilities",
+    responses={
+        400: {
+            "model": ErrorResponse,
+            "description": "Package name or version failed validation",
+        },
+        502: {"model": ErrorResponse, "description": "OSV was unusable"},
+    },
+)
+async def get_package_vulnerabilities(
+    request: Request,
+    package_name: Annotated[
+        str, Path(description="Exact npm package name; case-sensitive.")
+    ],
+    version: Annotated[str, Query(description="Exact installed version to check.")],
+) -> VersionVulnerabilities:
+    # Deliberately lean: no npm registry call, so an audit of many
+    # dependencies costs one OSV request each instead of two upstream calls.
+    # There's no existence check, so an unpublished version and a clean one
+    # both come back "not vulnerable" rather than 404 — the caller already
+    # has the version from its own manifest and isn't asking us to confirm it.
+    # Registered ahead of the plain "/package/{package_name:path}" route
+    # below: that route's :path converter is greedy enough to swallow
+    # "/vulnerabilities" too, so route order here is load-bearing.
+    validate_package_name(package_name)
+    validate_version(version)
+
+    client: httpx.AsyncClient = request.app.state.http_client
+    vulnerabilities = await get_vulnerabilities(client, package_name, version=version)
+
+    return VersionVulnerabilities(
+        package_name=package_name,
+        version=version,
+        vulnerable=bool(vulnerabilities),
+        vulnerabilities=vulnerabilities,
     )
-
-
-async def get_vulnerabilities(
-    client: httpx.AsyncClient, package_name: str, version: str | None = None
-) -> list[Vulnerability]:
-    query: dict[str, Any] = {"package": {"name": package_name, "ecosystem": "npm"}}
-    if version:
-        query["version"] = version
-
-    try:
-        response = await client.post(OSV_API_URL, json=query)
-        response.raise_for_status()
-        data = response.json()
-    except (httpx.HTTPError, ValueError) as exc:
-        logger.warning(
-            "OSV lookup failed for %s (version=%s): %s", package_name, version, exc
-        )
-        raise HTTPException(status_code=502, detail=OSV_UNAVAILABLE) from exc
-
-    try:
-        return [to_vulnerability(vuln) for vuln in data.get("vulns", [])]
-    except (KeyError, TypeError, AttributeError) as exc:
-        logger.warning("OSV returned an unreadable advisory for %s", package_name)
-        raise HTTPException(status_code=502, detail=OSV_UNAVAILABLE) from exc
-
-
-async def fetch_package_metadata(
-    client: httpx.AsyncClient, package_name: str
-) -> dict[str, Any]:
-    encoded_name = quote(package_name, safe="")
-
-    try:
-        response = await client.get(f"{NPM_REGISTRY_URL}/{encoded_name}")
-    except httpx.HTTPError as exc:
-        logger.warning("npm registry unreachable for %s: %s", package_name, exc)
-        raise HTTPException(status_code=502, detail=REGISTRY_UNAVAILABLE) from exc
-
-    if response.status_code == 404:
-        raise HTTPException(status_code=404, detail="Package not found")
-
-    try:
-        response.raise_for_status()
-        return response.json()
-    except (httpx.HTTPError, ValueError) as exc:
-        # A malformed or error response from the registry is an upstream
-        # problem, not a bad request — don't surface it as a 500.
-        logger.warning(
-            "npm registry returned %s for %s", response.status_code, package_name
-        )
-        raise HTTPException(status_code=502, detail=REGISTRY_UNUSABLE) from exc
 
 
 @app.get(
@@ -193,6 +152,17 @@ async def get_package(
             vuln.affects_latest_version = vuln.id in ids_affecting_latest
         latest_version_vulnerable = bool(vulnerable_in_latest)
 
+    weekly_downloads = await fetch_weekly_downloads(client, package_name)
+
+    # These all come from the same npm document already fetched above, so
+    # reading them costs nothing extra — but the per-version manifest isn't
+    # in every test fixture or every real package, so it's optional. Checked
+    # by membership, not truthiness: a real manifest with zero dependencies
+    # is an empty-but-present dict, which is falsy but not missing.
+    versions = data.get("versions")
+    has_version_manifest = isinstance(versions, dict) and latest_version in versions
+    latest_manifest = versions[latest_version] if has_version_manifest else {}
+
     try:
         return PackageHealth(
             name=name,
@@ -202,6 +172,17 @@ async def get_package(
             latest_version_vulnerable=latest_version_vulnerable,
             vulnerability_count=len(vulnerabilities),
             vulnerabilities=vulnerabilities,
+            license=extract_license(data),
+            maintainers_count=(
+                len(data["maintainers"]) if "maintainers" in data else None
+            ),
+            dependency_count=(
+                len(latest_manifest.get("dependencies", {}))
+                if has_version_manifest
+                else None
+            ),
+            deprecated=bool(latest_manifest.get("deprecated")),
+            weekly_downloads=weekly_downloads,
         )
     except ValidationError as exc:
         # Registry fields that don't fit the schema (an unparseable publish

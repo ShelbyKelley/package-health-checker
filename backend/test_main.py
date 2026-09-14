@@ -6,7 +6,13 @@ import respx
 from fastapi.testclient import TestClient
 from httpx import Response
 
-from main import MAX_PACKAGE_NAME_LENGTH, NPM_REGISTRY_URL, OSV_API_URL, app
+from clients import (
+    MAX_PACKAGE_NAME_LENGTH,
+    NPM_DOWNLOADS_URL,
+    NPM_REGISTRY_URL,
+    OSV_API_URL,
+)
+from main import app
 
 
 @pytest.fixture
@@ -55,6 +61,14 @@ VULN_STILL_IN_LATEST = {
 }
 
 
+def mock_downloads(name="examplepkg", downloads=1000):
+    """The download-counts API is a separate host, so every test that
+    reaches a full response needs its own mock for it."""
+    return respx.get(f"{NPM_DOWNLOADS_URL}/{name}").mock(
+        return_value=Response(200, json={"downloads": downloads})
+    )
+
+
 def osv_split_by_version(request):
     """Mimics OSV: an unscoped query returns every vuln ever reported;
     a version-scoped query returns only the ones affecting that version."""
@@ -62,6 +76,15 @@ def osv_split_by_version(request):
     if "version" in body:
         return Response(200, json={"vulns": [VULN_STILL_IN_LATEST]})
     return Response(200, json={"vulns": [VULN_FIXED_IN_LATEST, VULN_STILL_IN_LATEST]})
+
+
+def test_root_reports_the_service_is_running(client):
+    # The one endpoint that makes no upstream call, so it answers "is the
+    # API itself up?" independently of whether npm or OSV are.
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert response.json() == {"message": "Package Health Checker API is running"}
 
 
 @respx.mock
@@ -72,6 +95,7 @@ def test_lowercase_package_name_works(client):
     osv_route = respx.post(OSV_API_URL).mock(
         return_value=Response(200, json={"vulns": []})
     )
+    mock_downloads()
 
     response = client.get("/package/examplepkg")
     body = response.json()
@@ -90,6 +114,7 @@ def test_latest_version_vulnerable_when_a_vuln_still_affects_it(client):
         return_value=Response(200, json=LOWERCASE_PACKAGE_BODY)
     )
     respx.post(OSV_API_URL).mock(side_effect=osv_split_by_version)
+    mock_downloads()
 
     response = client.get("/package/examplepkg")
     body = response.json()
@@ -115,6 +140,7 @@ def test_latest_version_not_vulnerable_when_all_vulns_are_fixed(client):
             else Response(200, json={"vulns": [VULN_FIXED_IN_LATEST]})
         )
     )
+    mock_downloads()
 
     response = client.get("/package/examplepkg")
     body = response.json()
@@ -133,6 +159,7 @@ def test_mixed_case_package_name_is_accepted_and_looked_up_as_typed(client):
     osv_route = respx.post(OSV_API_URL).mock(
         return_value=Response(200, json={"vulns": []})
     )
+    mock_downloads(name="MixedCasePkg")
 
     response = client.get("/package/MixedCasePkg")
 
@@ -177,6 +204,7 @@ def test_scoped_package_name_with_uppercase_is_accepted(client):
             return_value=Response(200, json=SCOPED_PACKAGE_BODY)
         )
         respx.post(OSV_API_URL).mock(return_value=Response(200, json={"vulns": []}))
+        mock_downloads(name="@Scope%2FPackage")
 
         response = client.get("/package/@Scope/Package")
 
@@ -238,6 +266,146 @@ def test_osv_outage_is_a_502_not_a_500(client):
 
 
 @respx.mock
+def test_enrichment_fields_are_surfaced_from_the_npm_payload(client):
+    respx.get(f"{NPM_REGISTRY_URL}/examplepkg").mock(
+        return_value=Response(
+            200,
+            json={
+                **LOWERCASE_PACKAGE_BODY,
+                "license": "MIT",
+                "maintainers": [{"name": "a"}, {"name": "b"}],
+                "versions": {
+                    "0.0.0": {
+                        "dependencies": {"leftpad": "^1.0.0"},
+                        "deprecated": "use something-else instead",
+                    }
+                },
+            },
+        )
+    )
+    respx.post(OSV_API_URL).mock(return_value=Response(200, json={"vulns": []}))
+    mock_downloads(downloads=4200)
+
+    body = client.get("/package/examplepkg").json()
+
+    assert body["license"] == "MIT"
+    assert body["maintainers_count"] == 2
+    assert body["dependency_count"] == 1
+    assert body["deprecated"] is True
+    assert body["weekly_downloads"] == 4200
+
+
+@respx.mock
+def test_zero_dependencies_is_a_real_count_not_unknown(client):
+    # A package with no runtime dependencies simply omits the key entirely
+    # rather than setting it to {} — this must read as 0, not "unknown".
+    respx.get(f"{NPM_REGISTRY_URL}/examplepkg").mock(
+        return_value=Response(
+            200,
+            json={**LOWERCASE_PACKAGE_BODY, "versions": {"0.0.0": {}}},
+        )
+    )
+    respx.post(OSV_API_URL).mock(return_value=Response(200, json={"vulns": []}))
+    mock_downloads()
+
+    body = client.get("/package/examplepkg").json()
+
+    assert body["dependency_count"] == 0
+
+
+@respx.mock
+def test_missing_enrichment_fields_are_null_not_erroring(client):
+    # LOWERCASE_PACKAGE_BODY has no license/maintainers/versions at all —
+    # a minimal but real shape for a very old or sparse registry entry.
+    respx.get(f"{NPM_REGISTRY_URL}/examplepkg").mock(
+        return_value=Response(200, json=LOWERCASE_PACKAGE_BODY)
+    )
+    respx.post(OSV_API_URL).mock(return_value=Response(200, json={"vulns": []}))
+    mock_downloads()
+
+    body = client.get("/package/examplepkg").json()
+
+    assert body["license"] is None
+    assert body["maintainers_count"] is None
+    assert body["dependency_count"] is None
+    assert body["deprecated"] is False
+
+
+@respx.mock
+def test_downloads_outage_degrades_to_null_instead_of_failing(client):
+    respx.get(f"{NPM_REGISTRY_URL}/examplepkg").mock(
+        return_value=Response(200, json=LOWERCASE_PACKAGE_BODY)
+    )
+    respx.post(OSV_API_URL).mock(return_value=Response(200, json={"vulns": []}))
+    respx.get(f"{NPM_DOWNLOADS_URL}/examplepkg").mock(
+        side_effect=httpx.ConnectError("boom")
+    )
+
+    response = client.get("/package/examplepkg")
+
+    assert response.status_code == 200
+    assert response.json()["weekly_downloads"] is None
+
+
+@respx.mock
+def test_version_vulnerabilities_endpoint_scopes_to_the_exact_version(client):
+    osv_route = respx.post(OSV_API_URL).mock(
+        return_value=Response(200, json={"vulns": [VULN_STILL_IN_LATEST]})
+    )
+
+    response = client.get("/package/examplepkg/vulnerabilities?version=1.0.0")
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["package_name"] == "examplepkg"
+    assert body["version"] == "1.0.0"
+    assert body["vulnerable"] is True
+    assert body["vulnerabilities"][0]["id"] == "GHSA-current-0001"
+    assert json.loads(osv_route.calls.last.request.content)["version"] == "1.0.0"
+
+
+@respx.mock
+def test_version_vulnerabilities_endpoint_accepts_a_scoped_package(client):
+    # Lockfile audits hit this route for every installed package, and scoped
+    # names (@babel/core, @types/node) are a large share of a real lockfile.
+    # The encoded slash must survive routing ahead of the greedy :path route.
+    osv_route = respx.post(OSV_API_URL).mock(
+        return_value=Response(200, json={"vulns": []})
+    )
+
+    response = client.get("/package/%40babel%2Fcore/vulnerabilities?version=7.24.0")
+
+    assert response.status_code == 200
+    assert response.json()["package_name"] == "@babel/core"
+    sent = json.loads(osv_route.calls.last.request.content)
+    assert sent["package"]["name"] == "@babel/core"
+    assert sent["version"] == "7.24.0"
+
+
+@respx.mock
+def test_version_vulnerabilities_endpoint_makes_no_npm_call(client):
+    npm_route = respx.get(f"{NPM_REGISTRY_URL}/examplepkg")
+    respx.post(OSV_API_URL).mock(return_value=Response(200, json={"vulns": []}))
+
+    response = client.get("/package/examplepkg/vulnerabilities?version=1.0.0")
+
+    assert response.status_code == 200
+    assert not npm_route.called
+
+
+def test_version_vulnerabilities_endpoint_requires_a_version(client):
+    response = client.get("/package/examplepkg/vulnerabilities")
+
+    assert response.status_code == 422
+
+
+def test_version_vulnerabilities_endpoint_rejects_invalid_package_name(client):
+    response = client.get("/package/ex$ample/vulnerabilities?version=1.0.0")
+
+    assert response.status_code == 400
+
+
+@respx.mock
 def test_unparseable_publish_date_is_a_502_not_a_500(client):
     respx.get(f"{NPM_REGISTRY_URL}/examplepkg").mock(
         return_value=Response(
@@ -250,6 +418,7 @@ def test_unparseable_publish_date_is_a_502_not_a_500(client):
         )
     )
     respx.post(OSV_API_URL).mock(return_value=Response(200, json={"vulns": []}))
+    mock_downloads()
 
     response = client.get("/package/examplepkg")
 
