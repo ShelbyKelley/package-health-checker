@@ -1,0 +1,19 @@
+# Files in this directory that ship to the portfolio repo, one per line.
+# Read by .github/workflows/sync-to-portfolio.yml — a file left off this
+# list is never synced, even if it changes. Keep it in sync by hand when
+# adding or removing a component.
+Tool.jsx
+SearchTab.jsx
+AuditTab.jsx
+HealthCard.jsx
+AdvisoryList.jsx
+AuditReport.jsx
+FindingsTable.jsx
+Notes.jsx
+Constants.js
+HealthScore.js
+LockfileParsing.js
+AuditBuilder.js
+AuditExports.js
+Concurrency.js
+Pagination.jsx

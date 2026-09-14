@@ -4,8 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'frontend/src/components/PackageHealthChecker*.jsx'
-      - 'frontend/src/components/PackageHealthChecker*.js'
+      - 'frontend/src/components/**'
   workflow_dispatch:
 
 # The cross-repo work is all done with PORTFOLIO_REPO_PAT; the default token
@@ -35,38 +34,21 @@ jobs:
           token: ${{ secrets.PORTFOLIO_REPO_PAT }}
           path: portfolio-site
 
-      # The /g matters on both substitutions: the component names the env var
-      # in more than one place (the read and the misconfiguration message),
-      # and files import each other by name (e.g. PackageHealthCheckerTool.jsx
-      # imports './PackageHealthCheckerStatusBanner') — without /g only the
-      # first mention per line would be rewritten. Files land in their own
-      # PackageHealthChecker/ folder with the shared prefix stripped, since
-      # the folder now provides the namespacing the prefix used to.
-      - name: Copy component and its supporting files, adjusting env variable name and import paths
+      # sync-manifest.txt is the source of truth for what ships — a file in
+      # src/components/ that isn't listed there never syncs, even though the
+      # trigger above watches the whole directory. The /g on the env-var
+      # rename matters: the component names VITE_API_URL in more than one
+      # place (the read and the misconfiguration message).
+      - name: Copy the files listed in sync-manifest.txt, adjusting the env variable name
         run: |
           mkdir -p portfolio-site/src/components/PackageHealthChecker
-          names=()
-          for f in package-health-checker/frontend/src/components/PackageHealthChecker*.jsx \
-                   package-health-checker/frontend/src/components/PackageHealthChecker*.js; do
-            [ -e "$f" ] || continue
-            base="$(basename "$f")"
-            dest="${base#PackageHealthChecker}"
-            names+=("${dest%.*}")
-            sed -e 's/VITE_API_URL/VITE_PACKAGE_HEALTH_API_URL/g' \
-                -e 's#\./PackageHealthChecker#./#g' \
-              "$f" > "portfolio-site/src/components/PackageHealthChecker/$dest"
-          done
-
-          # The files are renamed above, but each is still imported and used
-          # (import specifiers, JSX tags) under its old PackageHealthChecker<Name>
-          # identifier — strip the prefix there too, everywhere it appears in
-          # every synced file, now that the folder provides the namespacing
-          # the prefix used to.
-          rename_args=()
-          for name in "${names[@]}"; do
-            rename_args+=(-e "s/\bPackageHealthChecker${name}\b/${name}/g")
-          done
-          sed -i "${rename_args[@]}" portfolio-site/src/components/PackageHealthChecker/*
+          src=package-health-checker/frontend/src/components
+          dest=portfolio-site/src/components/PackageHealthChecker
+          while IFS= read -r name; do
+            [ -z "$name" ] && continue
+            case "$name" in \#*) continue ;; esac
+            sed 's/VITE_API_URL/VITE_PACKAGE_HEALTH_API_URL/g' "$src/$name" > "$dest/$name"
+          done < "$src/sync-manifest.txt"
 
       - name: Set up Node
         uses: actions/setup-node@v7
@@ -89,10 +71,10 @@ jobs:
           path: portfolio-site
           add-paths: |
             src/components/PackageHealthChecker/**
-          commit-message: 'chore: sync PackageHealthCheckerTool from source repo'
-          title: 'Sync: PackageHealthCheckerTool update'
+          commit-message: 'chore: sync package health checker components from source repo'
+          title: 'Sync: package health checker component update'
           body: |
-            Automatic sync from the [Package Health Checker repo](https://github.com/ShelbyKelley/package-health-checker) after a change to the shared component or its supporting files.
+            Automatic sync from the [Package Health Checker repo](https://github.com/ShelbyKelley/package-health-checker) after a change to a file listed in `frontend/src/components/sync-manifest.txt`.
 
             Please review before merging — this was opened automatically.
           branch: sync/package-health-checker-tool
