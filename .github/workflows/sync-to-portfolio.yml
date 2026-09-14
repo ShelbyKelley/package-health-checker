@@ -36,14 +36,27 @@ jobs:
 
       # sync-manifest.txt is the source of truth for what ships — a file in
       # src/components/ that isn't listed there never syncs, even though the
-      # trigger above watches the whole directory. The /g on the env-var
-      # rename matters: the component names VITE_API_URL in more than one
-      # place (the read and the misconfiguration message).
+      # trigger above watches the whole directory. Every top-level FILE in
+      # the destination is wiped and recreated on every run, not just
+      # overwritten: a rename or deletion here (e.g. Filters.jsx merged into
+      # Constants.js) must remove the stale copy on the portfolio side too,
+      # or it keeps importing names that no longer exist there and breaks
+      # that repo's lint. This only removes files, never directories — the
+      # portfolio repo keeps its own PackageHealthChecker/__tests__/ folder
+      # for these components, following this repo's own __tests__
+      # convention, and sync-manifest.txt only ever lists flat filenames
+      # (never a path with a "/"), so the sync's scope was never anything
+      # but these top-level files. A recursive `rm -rf` on the whole
+      # directory would delete that test folder every single run.
+      # The /g on the env-var rename matters: the component names
+      # VITE_API_URL in more than one place (the read and the
+      # misconfiguration message).
       - name: Copy the files listed in sync-manifest.txt, adjusting the env variable name
         run: |
-          mkdir -p portfolio-site/src/components/PackageHealthChecker
-          src=package-health-checker/frontend/src/components
           dest=portfolio-site/src/components/PackageHealthChecker
+          mkdir -p "$dest"
+          find "$dest" -maxdepth 1 -type f -delete
+          src=package-health-checker/frontend/src/components
           while IFS= read -r name; do
             [ -z "$name" ] && continue
             case "$name" in \#*) continue ;; esac
