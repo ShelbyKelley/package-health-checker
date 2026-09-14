@@ -1,8 +1,8 @@
 # Package Health Checker
 
-Look up any npm package and see its real health at a glance: known vulnerabilities (with severity and CVE numbers where available), package metadata, and links to full advisory details — the same diagnostic work I do professionally, built as a standalone tool.
+Look up any npm package and see its real health at a glance: known vulnerabilities (with severity and CVE numbers where available), a health score and grade, and package metadata, or drop in a `package-lock.json` and audit every installed package, transitive dependencies included — the same diagnostic work I do professionally, built as a standalone tool.
 
-**Backend:** deployed and live on AWS Lambda behind API Gateway. **Frontend:** wired into my [portfolio site](https://shelbyannkelley.com/package-health-checker)'s Package Health Checker page, or run standalone locally (see below).
+**Backend:** deployed and live on AWS Lambda behind API Gateway. **Frontend:** wired into my [portfolio site](https://shelbyannkelley.com/package-health-checker)'s Package Health Checker page, or run standalone locally (see below). The app's own "notes" section explains how the data is sourced and how to read a result; the [case study](https://shelbyannkelley.com/package-health-checker) on my portfolio covers the scoping and trade-off decisions behind it in full.
 
 ## Tech stack
 
@@ -21,7 +21,7 @@ Look up any npm package and see its real health at a glance: known vulnerabiliti
 - Least-privilege IAM execution role (logs only)
 
 **Frontend**
-- **React** (Vite) — search UI, with a `PackageHealthCheckerTool` component shared with my [portfolio site](https://github.com/ShelbyKelley/portfolio-site) (synced automatically via a GitHub Actions workflow that opens a PR against that repo whenever this component changes)
+- **React** (Vite) — search UI, with components shared with my [portfolio site](https://github.com/ShelbyKelley/portfolio-site) (synced automatically via a GitHub Actions workflow that opens a PR against that repo whenever a manifest-listed component changes)
 - **Tailwind CSS v4** — styling, sharing a fall/Halloween theme (light/dark) with that same portfolio site
 - **React 19 form Actions** (`useActionState`) for the search submit, so the
   pending state and error handling come from the action rather than from
@@ -38,8 +38,11 @@ Look up any npm package and see its real health at a glance: known vulnerabiliti
 
 ## What it does
 
-- Pulls live package metadata (description, latest version, last publish date) from the npm registry
+- Pulls live package metadata (description, latest version, last publish date, license, maintainer count, weekly downloads, deprecation status) from the npm registry
 - Cross-references known vulnerabilities via [OSV.dev](https://osv.dev), including severity and CVE numbers where available, with a link to the full advisory for exact affected-version details
+- Computes a health score and letter grade from open advisories, publish cadence, and maintainer count, as a triage signal rather than a certification
+- Audits an npm `package-lock.json` (v2/v3) the way `npm audit` does: every installed package in the tree, transitive dependencies included, at its exact installed version. A package installed at two versions is checked at both. Parsing happens client-side (nothing is uploaded), lookups run six at a time with a live progress count, and the report pages its findings 10 at a time with a patched-version column (OSV's own reported fix, not locally computed) plus JSON/CSV/Markdown export that always covers every finding, whatever page or filter is showing
+- Rejects a `package.json` on purpose. It lists version *ranges* (`^4.17.19`), not what's installed, and OSV answers an unparseable range with a plausible but wrong result rather than an error. On a generated lockfile containing known-vulnerable versions, the audit flagged exactly the same 10 packages as `npm audit`, six of them transitive dependencies a `package.json` never lists
 - Supports scoped packages (e.g. `@angular/common`)
 - Validates package name input (format and length) before it reaches npm or OSV
 - Rate-limited at the API Gateway layer to prevent abuse (see Infrastructure above)
@@ -51,21 +54,32 @@ The tool is usable without a mouse or a working pair of eyes, which for a
 search-and-filter UI mostly comes down to not leaking information through
 visual position alone:
 
-- Every control has an accessible name — the search field is labelled, and the
-  sort and severity selects carry their own names rather than relying on the
-  option text
-- The "affects latest only" toggle exposes `aria-pressed`, so its on/off state
-  is announced rather than implied by colour
-- The verdict banner is a live region, so the answer to "is this safe?" is
-  announced when it replaces the previous result
-- Paging announces the new page, since the cards above it change silently
+- Every control has an accessible name — the package search field, the
+  lockfile textarea, and the "advisories per page" select are all labelled
+  rather than relying on placeholder or option text
+- Every filter is a toggle that exposes `aria-pressed` — the severity pills
+  and the audit's "vulnerable only" toggle — so on/off state is announced
+  rather than implied by colour. Each keeps a fixed label and changes only
+  its pressed state, so a toggle never reads as a different button
+- The health verdict is a live region, so the answer to "is this safe?" is
+  announced when a new result replaces the previous one. The bare grade
+  letter is restated in words, since "A" read aloud on its own means nothing
+- Paging and the audit's start and finish announce themselves, since the
+  content they describe changes without any other cue. The per-package
+  progress bar uses `role="progressbar"` with live values but sits outside
+  the live region on purpose, since announcing hundreds of increments would
+  drown a screen reader
+- Errors (an unreachable API, a throttle, a missing package) use
+  `role="alert"`, and the export buttons' decorative arrows are hidden from
+  assistive tech
 - Per-advisory links are named for the advisory they open, instead of a dozen
   identical "View advisory" links
 - Colour contrast meets WCAG AA in both themes: every text pair clears 4.5:1
   (the severity badges are 12px text on a 10% tint of their own colour, which
   is what caps those hues' lightness), and borders that identify a control
-  clear 3:1. Verified with axe DevTools and a scripted audit of every
-  foreground/background pair in the theme.
+  clear 3:1. Verified with an automated axe-core audit (WCAG 2.1 A and AA)
+  of both the search result and the audit report, in both themes, with zero
+  violations.
 
 ## Running it locally
 
@@ -169,19 +183,43 @@ still can't be merged.
 # Backend (from backend/, with venv active)
 pip install -r requirements-dev.txt
 pytest
+pytest --cov=main --cov=clients --cov=models --cov-report=term-missing
 
 # Frontend (from frontend/)
 npm test
+npm run test:coverage
 ```
 
 Backend tests mock outbound npm/OSV calls with `respx` — no live network
-access needed, and nothing in the suite depends on timing or ordering.
+access needed, and nothing in the suite depends on timing or ordering. They
+are split to mirror the code: `test_main.py` exercises the routes end to end
+through FastAPI's `TestClient`, and `test_clients.py` unit-tests the upstream
+client and validation layer directly.
 
-Frontend tests render the tool and drive it the way a user does — by label,
-role, and button text — and cover the cases that are easy to get silently
-wrong: a missing `VITE_API_URL` at build time, a throttle reported as a
-throttle rather than a missing package, and filters resetting when a new
-package is searched.
+Frontend tests live in `src/components/__tests__/`, render the tool, and drive
+it the way a user does — by label, role, and button text — rather than by
+test ids or class names. They deliberately cover the cases that are easy to
+get silently wrong:
+
+- a missing `VITE_API_URL` at build time, reported instead of requesting
+  `undefined/package/...`
+- a throttle (429) or upstream outage (502) reported as such, rather than as
+  a missing package
+- an active filter resetting when a different package is searched
+- an audit where **every** lookup fails showing a network error, rather than
+  a zeroed-out "Nothing known-vulnerable" report that looks like good news
+- exports always covering the full findings set, even while the on-screen
+  table is filtered down or on a later page (checked against the real
+  downloaded JSON, CSV, and Markdown, not just the button wiring)
+- a lockfile audit reaching transitive dependencies, and checking a package
+  installed at two versions at **both** (keying by name alone silently drops
+  one), while a `package.json` is rejected rather than half-parsed
+- lookups never exceeding the concurrency cap, and a slow earlier audit never
+  overwriting a newer one
+
+Both suites run near full coverage (backend 100% of lines, frontend about
+99%). Coverage output lands in gitignored paths (`backend/.coverage`,
+`frontend/coverage/`), so running it locally never dirties the working tree.
 
 ## CI/CD
 
@@ -196,7 +234,8 @@ Two GitHub Actions workflows, plus the component sync:
   to detect whether `backend/` changed — a `workflow_run` event carries no
   commit range, so that check could silently skip a real backend change.
 - **`sync-to-portfolio.yml`** — opens a PR against the portfolio repo
-  whenever the shared `PackageHealthChecker*` components change.
+  whenever a file listed in `frontend/src/components/sync-manifest.txt`
+  changes.
 
 Because images are tagged with the commit SHA rather than `latest`, what's
 running in Lambda is always traceable back to the commit that produced it.
