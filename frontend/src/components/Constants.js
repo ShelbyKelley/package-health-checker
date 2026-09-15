@@ -36,13 +36,18 @@ export function severityClass(severity) {
 // Picked for a spread of health grades on real data, not just cleanliness —
 // request and angular (legacy AngularJS) are both deprecated with unfixed
 // advisories, so the tool has something to actually say on the first click.
+// `name` is the actual npm package looked up; `label` is display-only. They
+// differ for angular: the real npm package for legacy AngularJS is published
+// as "angular" (there is no "angularjs" package), but that name alone reads
+// as Angular 2+, so the button is labeled "angularjs" to disambiguate
+// without changing what gets queried.
 export const SUGGESTED_PACKAGES = [
-  'lodash',
-  'express',
-  'colors',
-  'node-sass',
-  'request',
-  'angular',
+  { name: 'lodash', label: 'lodash' },
+  { name: 'express', label: 'express' },
+  { name: 'colors', label: 'colors' },
+  { name: 'node-sass', label: 'node-sass' },
+  { name: 'request', label: 'request' },
+  { name: 'angular', label: 'angularjs' },
 ]
 
 // Every failure used to surface as "Package not found", which hid the two

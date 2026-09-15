@@ -90,14 +90,14 @@ function SearchTab({ apiBaseUrl }) {
 
       <div className="flex gap-2 flex-wrap items-center mt-3.5">
         <span className="font-mono text-xs text-body">try:</span>
-        {SUGGESTED_PACKAGES.map((name) => (
+        {SUGGESTED_PACKAGES.map(({ name, label }) => (
           <button
             key={name}
             type="button"
             onClick={() => pick(name)}
             className="font-mono text-xs text-body bg-transparent border border-body rounded-full px-3 py-1.5 cursor-pointer hover:border-brand hover:text-brand transition-colors"
           >
-            {name}
+            {label}
           </button>
         ))}
       </div>
